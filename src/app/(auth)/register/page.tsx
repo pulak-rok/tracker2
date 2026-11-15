@@ -19,16 +19,26 @@ export default function RegisterPage() {
     setLoading(true);
     setError(null);
 
-    const { error } = await supabase.auth.signUp({
+    const { data, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
-      options: {
-        emailRedirectTo: `${window.location.origin}/`,
-      },
     });
 
-    if (error) {
-      setError(error.message);
+    if (signUpError) {
+      setError(signUpError.message);
+      setLoading(false);
+      return;
+    }
+
+    // Directly sign in to bypass email confirmation step if configured or auto-session
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (signInError) {
+      // If email confirmation is strictly required by Supabase dashboard settings, show helpful hint
+      setError("Account created! Please check your Supabase settings if email confirmation is enabled, or sign in directly.");
       setLoading(false);
     } else {
       router.push("/");
@@ -92,7 +102,7 @@ export default function RegisterPage() {
             disabled={loading}
             className="w-full bg-profit hover:bg-profit/90 text-black font-semibold rounded-lg py-2.5 text-sm transition-all flex items-center justify-center gap-2 shadow-lg shadow-profit/10"
           >
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Create Account <ArrowRight className="w-4 h-4" /></>}
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <>Create Account & Sign In <ArrowRight className="w-4 h-4" /></>}
           </button>
         </form>
 
