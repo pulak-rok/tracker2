@@ -4,7 +4,7 @@ import { calculateRoadmapMetrics } from "@/lib/math/roadmap-calculations";
 import { formatCurrency } from "@/lib/utils";
 import { CircularProgress } from "./CircularProgress";
 import { AnimatedRoadmapTrack } from "./AnimatedRoadmapTrack";
-import { ArrowUpRight, Calendar, ShieldAlert } from "lucide-react";
+import { ArrowUpRight } from "lucide-react";
 
 interface RoadmapCardProps {
   roadmap: Roadmap;

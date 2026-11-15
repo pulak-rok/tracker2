@@ -1,8 +1,9 @@
-'client';
+"use client";
+
 import { useState } from "react";
 import { simulateTradingEdge, RiskSimulationInput } from "@/lib/math/probability";
 import { formatCurrency } from "@/lib/utils";
-import { Calculator, ShieldCheck, AlertCircle } from "lucide-react";
+import { Calculator, AlertCircle } from "lucide-react";
 
 export default function CalculatorPage() {
   const [riskPerTrade, setRiskPerTrade] = useState("100");
@@ -89,7 +90,10 @@ export default function CalculatorPage() {
 
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-terminal-surface border border-terminal-border rounded-xl p-6 shadow-xl">
-            <h2 className="text-sm font-bold text-white mb-4">Simulation Results (Binomial Model)</h2>
+            <h2 className="text-sm font-bold text-white mb-1">Simulation Results (Statistical Estimate)</h2>
+            <p className="text-[11px] text-gray-400 mb-4">
+              Computed via an exact binomial model assuming independent trades and fixed R-multiples. Not a guarantee of future returns.
+            </p>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
               <div className="bg-terminal-elevated/50 p-4 rounded-lg border border-terminal-border">
                 <span className="text-[10px] text-gray-400 uppercase">Probability of Target</span>

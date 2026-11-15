@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Roadmap, DailyRecord } from "@/types/database";
 import { RoadmapCard } from "@/components/roadmap/RoadmapCard";
 import { formatCurrency } from "@/lib/utils";
-import { Target, TrendingUp, Trophy, ArrowRight } from "lucide-react";
+import { Target, ArrowRight } from "lucide-react";
 import Link from "next/link";
 
 export default async function OverviewDashboard() {

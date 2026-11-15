@@ -1,7 +1,14 @@
-'client';
+"use client";
+
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Target, BookOpen, BarChart3, Calculator } from "lucide-react";
+import {
+  LayoutDashboard,
+  Target,
+  BookOpen,
+  BarChart3,
+  Calculator,
+} from "lucide-react";
 
 const mobileNav = [
   { name: "Overview", href: "/", icon: LayoutDashboard },

@@ -1,9 +1,10 @@
-'client';
-import { useState, useEffect } from "react";
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Roadmap, DailyRecord } from "@/types/database";
 import { RoadmapCard } from "@/components/roadmap/RoadmapCard";
-import { Target, Plus, Loader2 } from "lucide-react";
+import { Plus, Loader2 } from "lucide-react";
 
 export default function RoadmapsPage() {
   const [roadmaps, setRoadmaps] = useState<Roadmap[]>([]);
@@ -11,7 +12,6 @@ export default function RoadmapsPage() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
 
-  // Form state
   const [name, setName] = useState("");
   const [profitTarget, setProfitTarget] = useState("");
   const [startingBalance, setStartingBalance] = useState("0");
@@ -27,7 +27,7 @@ export default function RoadmapsPage() {
 
   const supabase = createClient();
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -44,11 +44,11 @@ export default function RoadmapsPage() {
     setRoadmaps(rData || []);
     setDailyRecords(dData || []);
     setLoading(false);
-  };
+  }, [supabase]);
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [fetchData]);
 
   const handleCreateRoadmap = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,6 +79,9 @@ export default function RoadmapsPage() {
       setProfitTarget("");
       setRiskPerTrade("");
       setTargetDate("");
+      setMaxDrawdown("");
+      setDailyTradeLimit("");
+      setNotes("");
       fetchData();
     } else {
       alert(error.message);
@@ -213,6 +216,41 @@ export default function RoadmapsPage() {
                     className="w-full bg-terminal-elevated border border-terminal-border rounded-lg p-2.5 text-white"
                   />
                 </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-gray-400 mb-1">Max Drawdown $ (Opt)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={maxDrawdown}
+                    onChange={(e) => setMaxDrawdown(e.target.value)}
+                    placeholder="1000"
+                    className="w-full bg-terminal-elevated border border-terminal-border rounded-lg p-2.5 text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-gray-400 mb-1">Daily Trade Limit (Opt)</label>
+                  <input
+                    type="number"
+                    value={dailyTradeLimit}
+                    onChange={(e) => setDailyTradeLimit(e.target.value)}
+                    placeholder="3"
+                    className="w-full bg-terminal-elevated border border-terminal-border rounded-lg p-2.5 text-white"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-gray-400 mb-1">Notes (Optional)</label>
+                <textarea
+                  rows={2}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Strategy rules, session focus..."
+                  className="w-full bg-terminal-elevated border border-terminal-border rounded-lg p-2.5 text-white"
+                />
               </div>
 
               <div className="flex justify-end gap-3 pt-4 border-t border-terminal-border">

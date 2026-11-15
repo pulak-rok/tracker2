@@ -1,16 +1,17 @@
-'client';
+"use client";
+
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { 
-  LayoutDashboard, 
-  Target, 
-  BookOpen, 
-  BarChart3, 
-  Calculator, 
-  History, 
-  Settings, 
+import {
+  LayoutDashboard,
+  Target,
+  BookOpen,
+  BarChart3,
+  Calculator,
+  History,
+  Settings,
   LogOut,
-  TrendingUp 
+  TrendingUp,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -49,7 +50,9 @@ export function Sidebar() {
 
       <nav className="flex-1 px-4 py-6 space-y-1">
         {navigation.map((item) => {
-          const isActive = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href));
+          const isActive =
+            pathname === item.href ||
+            (item.href !== "/" && pathname.startsWith(item.href));
           const Icon = item.icon;
           return (
             <Link

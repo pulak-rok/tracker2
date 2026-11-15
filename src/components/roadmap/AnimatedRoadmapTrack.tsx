@@ -1,4 +1,5 @@
-'client';
+"use client";
+
 import React from "react";
 import { CheckCircle2, Circle, Trophy } from "lucide-react";
 

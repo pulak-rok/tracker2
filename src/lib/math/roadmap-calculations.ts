@@ -32,7 +32,10 @@ export function calculateRoadmapMetrics(
   const startBal = Number(roadmap.starting_balance);
   const risk = Number(roadmap.risk_per_trade);
   const rr = Number(roadmap.rr_ratio);
-  const winRateAssumption = roadmap.win_rate_assumption ? Number(roadmap.win_rate_assumption) : undefined;
+  const winRateAssumption =
+    roadmap.win_rate_assumption !== null && roadmap.win_rate_assumption !== undefined
+      ? Number(roadmap.win_rate_assumption)
+      : undefined;
 
   let currentNetPnl = 0;
   let totalTrades = 0;
