@@ -94,6 +94,7 @@ create table public.trades (
   notes            text,
   created_at       timestamptz not null default now(),
   updated_at       timestamptz not null default now(),
+  -- a trade can only point at a day that belongs to the SAME roadmap
   constraint trades_day_fk foreign key (daily_record_id, roadmap_id)
     references public.daily_records (id, roadmap_id) on delete cascade,
   constraint trades_roadmap_fk foreign key (roadmap_id)
@@ -108,6 +109,7 @@ create index trades_day_idx     on public.trades (daily_record_id);
 create trigger trg_trades_updated before update on public.trades
   for each row execute function public.set_updated_at();
 
+-- assign trade_no, refuse trades on quick-summary days
 create or replace function public.trades_before_insert() returns trigger
 language plpgsql as $$
 begin
@@ -123,6 +125,7 @@ end $$;
 create trigger trg_trades_before_insert before insert on public.trades
   for each row execute function public.trades_before_insert();
 
+-- single source of truth: day totals are always derived from trades
 create or replace function public.recalc_daily_record() returns trigger
 language plpgsql as $$
 declare rid uuid;
@@ -146,6 +149,7 @@ end $$;
 create trigger trg_trades_recalc after insert or update or delete on public.trades
   for each row execute function public.recalc_daily_record();
 
+-- ---------- atomic day creation (day + trades in one transaction) ----------
 create or replace function public.create_detailed_day(
   p_roadmap_id uuid, p_trade_date date, p_session text, p_notes text, p_trades jsonb
 ) returns uuid language plpgsql security invoker as $$
@@ -166,7 +170,7 @@ begin
   return v_id;
 end $$;
 
--- RLS
+-- ---------- Row Level Security ----------
 alter table public.profiles      enable row level security;
 alter table public.roadmaps      enable row level security;
 alter table public.daily_records enable row level security;
