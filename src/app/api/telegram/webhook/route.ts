@@ -12,218 +12,723 @@ function getAdminClient() {
   });
 }
 
-async function sendTelegramMessage(chatId: string, text: string) {
+async function tgApi(method: string, payload: Record<string, any>) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return;
-  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+  await fetch(`https://api.telegram.org/bot${token}/${method}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text,
-    }),
+    body: JSON.stringify(payload),
   });
 }
 
-function parseTradeCommand(rawText: string) {
-  const trimmed = rawText.trim();
-  if (!trimmed) return null;
+function mainMenuKeyboard() {
+  return {
+    inline_keyboard: [
+      [{ text: "➕ Log New Trade", callback_data: "START_TRADE" }],
+      [
+        { text: "📊 Today Summary", callback_data: "TODAY_STATS" },
+        { text: "🆔 My Chat ID", callback_data: "SHOW_CHAT_ID" },
+      ],
+    ],
+  };
+}
 
-  const [headerPart, ...reasonParts] = trimmed.split("|");
-  const reason = reasonParts.join("|").trim() || null;
-  const tokens = headerPart.trim().split(/\s+/);
+function roadmapKeyboard(roadmaps: Array<{ id: string; name: string }>) {
+  return {
+    inline_keyboard: [
+      ...roadmaps.map((r) => [
+        { text: `🎯 ${r.name}`, callback_data: `RM:${r.id}` },
+      ]),
+      [{ text: "❌ Cancel", callback_data: "CANCEL" }],
+    ],
+  };
+}
 
-  if (tokens.length < 2) return null;
+function symbolKeyboard() {
+  return {
+    inline_keyboard: [
+      [
+        { text: "XAUUSD", callback_data: "SYM:XAUUSD" },
+        { text: "EURUSD", callback_data: "SYM:EURUSD" },
+        { text: "GBPUSD", callback_data: "SYM:GBPUSD" },
+      ],
+      [
+        { text: "NAS100", callback_data: "SYM:NAS100" },
+        { text: "US30", callback_data: "SYM:US30" },
+        { text: "BTCUSD", callback_data: "SYM:BTCUSD" },
+      ],
+      [{ text: "❌ Cancel", callback_data: "CANCEL" }],
+    ],
+  };
+}
 
-  const symbol = tokens[0].toUpperCase();
-  const outcomeToken = tokens[1].toUpperCase();
-  let outcome: "WIN" | "LOSS" | "BE" = "WIN";
-  if (outcomeToken === "WIN" || outcomeToken === "W") outcome = "WIN";
-  else if (outcomeToken === "LOSS" || outcomeToken === "L") outcome = "LOSS";
-  else if (outcomeToken === "BE" || outcomeToken === "B") outcome = "BE";
-  else return null;
+function sessionKeyboard() {
+  return {
+    inline_keyboard: [
+      [
+        { text: "🇬🇧 London", callback_data: "SES:London" },
+        { text: "🇺🇸 New York", callback_data: "SES:New York" },
+      ],
+      [
+        { text: "🇯🇵 Asian", callback_data: "SES:Asian" },
+        { text: "🌐 Other", callback_data: "SES:Other" },
+      ],
+      [{ text: "❌ Cancel", callback_data: "CANCEL" }],
+    ],
+  };
+}
 
-  let rawAmount = tokens[2] ? parseFloat(tokens[2].replace(/[^0-9.-]/g, "")) : NaN;
-  if (Number.isNaN(rawAmount)) {
-    rawAmount = outcome === "BE" ? 0 : 100;
+function outcomeKeyboard() {
+  return {
+    inline_keyboard: [
+      [
+        { text: "✅ WIN", callback_data: "OUT:WIN" },
+        { text: "❌ LOSS", callback_data: "OUT:LOSS" },
+        { text: "➖ BE", callback_data: "OUT:BE" },
+      ],
+      [{ text: "❌ Cancel", callback_data: "CANCEL" }],
+    ],
+  };
+}
+
+function pnlKeyboard(outcome: "WIN" | "LOSS" | "BE", risk: number, rr: number) {
+  const defaultWin = Number((risk * rr).toFixed(2));
+  const defaultLoss = Number(risk.toFixed(2));
+  if (outcome === "WIN") {
+    return {
+      inline_keyboard: [
+        [
+          { text: `+$${defaultWin} (1:${rr}R)`, callback_data: `PNL:${defaultWin}` },
+          { text: `+$${risk} (1R)`, callback_data: `PNL:${risk}` },
+          { text: `+$${risk * 3} (3R)`, callback_data: `PNL:${risk * 3}` },
+        ],
+        [{ text: "❌ Cancel", callback_data: "CANCEL" }],
+      ],
+    };
+  }
+  return {
+    inline_keyboard: [
+      [
+        { text: `-$${defaultLoss} (-1R)`, callback_data: `PNL:-${defaultLoss}` },
+        { text: `-$${(defaultLoss / 2).toFixed(2)} (-0.5R)`, callback_data: `PNL:-${(defaultLoss / 2).toFixed(2)}` },
+      ],
+      [{ text: "❌ Cancel", callback_data: "CANCEL" }],
+    ],
+  };
+}
+
+function skipCancelKeyboard(skipCode: string) {
+  return {
+    inline_keyboard: [
+      [{ text: "⏭ Skip", callback_data: skipCode }],
+      [{ text: "❌ Cancel", callback_data: "CANCEL" }],
+    ],
+  };
+}
+
+async function saveTradeToDb(
+  supabase: ReturnType<typeof getAdminClient>,
+  chatId: string,
+  userId: string,
+  draft: Record<string, any>
+) {
+  const { data: roadmap } = await supabase
+    .from("roadmaps")
+    .select("*")
+    .eq("id", draft.roadmap_id)
+    .single();
+
+  if (!roadmap) {
+    await tgApi("sendMessage", {
+      chat_id: chatId,
+      text: "⚠️ Selected roadmap not found. Tap below to start again:",
+      reply_markup: mainMenuKeyboard(),
+    });
+    return;
   }
 
-  let pnl = rawAmount;
-  if (outcome === "WIN") pnl = Math.abs(rawAmount) || 100;
-  else if (outcome === "LOSS") pnl = -(Math.abs(rawAmount) || 100);
-  else pnl = 0;
+  const today = new Date().toISOString().split("T")[0];
+  let { data: dayRecord } = await supabase
+    .from("daily_records")
+    .select("id, entry_mode")
+    .eq("roadmap_id", roadmap.id)
+    .eq("trade_date", today)
+    .single();
 
-  return { symbol, outcome, pnl, reason };
+  if (!dayRecord) {
+    const { data: createdDay, error: dayErr } = await supabase
+      .from("daily_records")
+      .insert({
+        user_id: userId,
+        roadmap_id: roadmap.id,
+        trade_date: today,
+        entry_mode: "detailed",
+        session: draft.session || "New York",
+        total_trades: 0,
+        wins: 0,
+        losses: 0,
+        break_evens: 0,
+        gross_profit: 0,
+        gross_loss: 0,
+      })
+      .select("id, entry_mode")
+      .single();
+
+    if (dayErr || !createdDay) {
+      await tgApi("sendMessage", {
+        chat_id: chatId,
+        text: `⚠️ Error preparing today's record: ${dayErr?.message || "Unknown"}`,
+        reply_markup: mainMenuKeyboard(),
+      });
+      return;
+    }
+    dayRecord = createdDay;
+  }
+
+  if (dayRecord.entry_mode === "summary") {
+    await tgApi("sendMessage", {
+      chat_id: chatId,
+      text: "⚠️ Today's record is in Quick Summary mode on the web app. Switch it to Detailed mode or delete the summary record to log individual trades.",
+      reply_markup: mainMenuKeyboard(),
+    });
+    return;
+  }
+
+  const outcome: "WIN" | "LOSS" | "BE" = draft.outcome || "WIN";
+  let pnl = Number(draft.pnl) || 0;
+  if (outcome === "WIN" && pnl <= 0) pnl = Math.abs(pnl) || Number(roadmap.risk_per_trade) || 100;
+  if (outcome === "LOSS" && pnl >= 0) pnl = -(Math.abs(pnl) || Number(roadmap.risk_per_trade) || 100);
+  if (outcome === "BE") pnl = 0;
+
+  const riskAmt = Number(roadmap.risk_per_trade) || Math.abs(pnl) || 100;
+  const rrVal =
+    outcome === "WIN" && riskAmt > 0
+      ? Number((pnl / riskAmt).toFixed(2))
+      : outcome === "LOSS"
+      ? -1
+      : 0;
+
+  const { error: tradeErr } = await supabase.from("trades").insert({
+    user_id: userId,
+    roadmap_id: roadmap.id,
+    daily_record_id: dayRecord.id,
+    symbol: (draft.symbol || "XAUUSD").toUpperCase(),
+    session: draft.session || "New York",
+    outcome,
+    risk_amount: riskAmt,
+    rr_achieved: rrVal,
+    pnl,
+    notes: draft.reason || null,
+    photo_url: draft.photo_url || null,
+  });
+
+  await supabase.from("telegram_sessions").upsert({
+    chat_id: chatId,
+    user_id: userId,
+    step: "IDLE",
+    draft: {},
+    updated_at: new Date().toISOString(),
+  });
+
+  if (tradeErr) {
+    await tgApi("sendMessage", {
+      chat_id: chatId,
+      text: `❌ Could not save trade: ${tradeErr.message}`,
+      reply_markup: mainMenuKeyboard(),
+    });
+    return;
+  }
+
+  const summary = [
+    "✅ *Trade Saved to TradePulse!*",
+    `• *Roadmap:* ${roadmap.name}`,
+    `• *Pair:* ${(draft.symbol || "XAUUSD").toUpperCase()}`,
+    `• *Session:* ${draft.session || "New York"}`,
+    `• *Outcome:* ${outcome} (${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)})`,
+    `• *Reason:* ${draft.reason || "—"}`,
+    `• *Chart Photo:* ${draft.photo_url ? "Attached ✅" : "None"}`,
+  ].join("\n");
+
+  await tgApi("sendMessage", {
+    chat_id: chatId,
+    text: summary,
+    parse_mode: "Markdown",
+    reply_markup: mainMenuKeyboard(),
+  });
+}
+
+async function startWizard(
+  supabase: ReturnType<typeof getAdminClient>,
+  chatId: string,
+  userId: string
+) {
+  const { data: roadmaps } = await supabase
+    .from("roadmaps")
+    .select("id, name, risk_per_trade, rr_ratio")
+    .eq("user_id", userId)
+    .eq("status", "active")
+    .order("created_at", { ascending: false });
+
+  if (!roadmaps || roadmaps.length === 0) {
+    await tgApi("sendMessage", {
+      chat_id: chatId,
+      text: "⚠️ You don't have any active roadmaps yet. Create one in the web app first!",
+      reply_markup: mainMenuKeyboard(),
+    });
+    return;
+  }
+
+  if (roadmaps.length === 1) {
+    const rm = roadmaps[0];
+    await supabase.from("telegram_sessions").upsert({
+      chat_id: chatId,
+      user_id: userId,
+      step: "ASK_SYMBOL",
+      draft: {
+        roadmap_id: rm.id,
+        risk_per_trade: Number(rm.risk_per_trade),
+        rr_ratio: Number(rm.rr_ratio),
+      },
+      updated_at: new Date().toISOString(),
+    });
+    await tgApi("sendMessage", {
+      chat_id: chatId,
+      text: `🎯 Roadmap: *${rm.name}*\n\n*Step 1/5 — Select or type Pair / Symbol:*\n_Example: XAUUSD, EURUSD, NAS100_`,
+      parse_mode: "Markdown",
+      reply_markup: symbolKeyboard(),
+    });
+    return;
+  }
+
+  await supabase.from("telegram_sessions").upsert({
+    chat_id: chatId,
+    user_id: userId,
+    step: "ASK_ROADMAP",
+    draft: {},
+    updated_at: new Date().toISOString(),
+  });
+
+  await tgApi("sendMessage", {
+    chat_id: chatId,
+    text: "🎯 *Choose a Roadmap for this trade:*",
+    parse_mode: "Markdown",
+    reply_markup: roadmapKeyboard(roadmaps),
+  });
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const msg = body.message || body.edited_message || body.channel_post;
+    const supabase = getAdminClient();
+
+    // 1. Handle Inline Button Clicks (callback_query)
+    if (body.callback_query) {
+      const cq = body.callback_query;
+      const chatId = String(cq.message?.chat?.id || cq.from?.id);
+      const data: string = cq.data || "";
+
+      await tgApi("answerCallbackQuery", { callback_query_id: cq.id });
+
+      if (data === "SHOW_CHAT_ID") {
+        await tgApi("sendMessage", {
+          chat_id: chatId,
+          text: `🆔 Your Telegram Chat ID is:\n\`${chatId}\`\n\nPaste this into *Settings* in TradePulse Command.`,
+          parse_mode: "Markdown",
+          reply_markup: mainMenuKeyboard(),
+        });
+        return NextResponse.json({ ok: true });
+      }
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("telegram_chat_id", chatId)
+        .single();
+
+      if (!profile) {
+        await tgApi("sendMessage", {
+          chat_id: chatId,
+          text: `⚠️ Account not linked yet.\n\nCopy your Chat ID: \`${chatId}\`\nOpen *Settings* in TradePulse Command, paste it, and save.`,
+          parse_mode: "Markdown",
+        });
+        return NextResponse.json({ ok: true });
+      }
+
+      if (data === "CANCEL") {
+        await supabase.from("telegram_sessions").upsert({
+          chat_id: chatId,
+          user_id: profile.id,
+          step: "IDLE",
+          draft: {},
+          updated_at: new Date().toISOString(),
+        });
+        await tgApi("sendMessage", {
+          chat_id: chatId,
+          text: "❌ Trade entry cancelled.",
+          reply_markup: mainMenuKeyboard(),
+        });
+        return NextResponse.json({ ok: true });
+      }
+
+      if (data === "TODAY_STATS") {
+        const today = new Date().toISOString().split("T")[0];
+        const { data: recs } = await supabase
+          .from("daily_records")
+          .select("wins, losses, break_evens, net_pl, roadmaps(name)")
+          .eq("user_id", profile.id)
+          .eq("trade_date", today);
+
+        if (!recs || recs.length === 0) {
+          await tgApi("sendMessage", {
+            chat_id: chatId,
+            text: `📊 No trades logged yet for today (${today}).`,
+            reply_markup: mainMenuKeyboard(),
+          });
+          return NextResponse.json({ ok: true });
+        }
+
+        const lines = recs.map(
+          (r: any) =>
+            `• *${r.roadmaps?.name || "Roadmap"}*: ${r.wins}W / ${r.losses}L / ${r.break_evens}BE (${Number(r.net_pl) >= 0 ? "+" : ""}$${Number(r.net_pl).toFixed(2)})`
+        );
+        await tgApi("sendMessage", {
+          chat_id: chatId,
+          text: `📊 *Today's Summary (${today}):*\n${lines.join("\n")}`,
+          parse_mode: "Markdown",
+          reply_markup: mainMenuKeyboard(),
+        });
+        return NextResponse.json({ ok: true });
+      }
+
+      if (data === "START_TRADE") {
+        await startWizard(supabase, chatId, profile.id);
+        return NextResponse.json({ ok: true });
+      }
+
+      const { data: sess } = await supabase
+        .from("telegram_sessions")
+        .select("*")
+        .eq("chat_id", chatId)
+        .single();
+
+      const draft = (sess?.draft as Record<string, any>) || {};
+
+      if (data.startsWith("RM:")) {
+        const rmId = data.slice(3);
+        const { data: rm } = await supabase
+          .from("roadmaps")
+          .select("id, name, risk_per_trade, rr_ratio")
+          .eq("id", rmId)
+          .single();
+
+        if (!rm) return NextResponse.json({ ok: true });
+        const nextDraft = {
+          ...draft,
+          roadmap_id: rm.id,
+          risk_per_trade: Number(rm.risk_per_trade),
+          rr_ratio: Number(rm.rr_ratio),
+        };
+        await supabase.from("telegram_sessions").upsert({
+          chat_id: chatId,
+          user_id: profile.id,
+          step: "ASK_SYMBOL",
+          draft: nextDraft,
+          updated_at: new Date().toISOString(),
+        });
+        await tgApi("sendMessage", {
+          chat_id: chatId,
+          text: `🎯 Roadmap: *${rm.name}*\n\n*Step 1/5 — Tap or type Symbol:*\n_Example: XAUUSD, EURUSD, NAS100_`,
+          parse_mode: "Markdown",
+          reply_markup: symbolKeyboard(),
+        });
+        return NextResponse.json({ ok: true });
+      }
+
+      if (data.startsWith("SYM:")) {
+        const symbol = data.slice(4);
+        await supabase.from("telegram_sessions").upsert({
+          chat_id: chatId,
+          user_id: profile.id,
+          step: "ASK_SESSION",
+          draft: { ...draft, symbol },
+          updated_at: new Date().toISOString(),
+        });
+        await tgApi("sendMessage", {
+          chat_id: chatId,
+          text: `📌 Symbol: *${symbol}*\n\n*Step 2/5 — Choose Trading Session:*`,
+          parse_mode: "Markdown",
+          reply_markup: sessionKeyboard(),
+        });
+        return NextResponse.json({ ok: true });
+      }
+
+      if (data.startsWith("SES:")) {
+        const session = data.slice(4);
+        await supabase.from("telegram_sessions").upsert({
+          chat_id: chatId,
+          user_id: profile.id,
+          step: "ASK_OUTCOME",
+          draft: { ...draft, session },
+          updated_at: new Date().toISOString(),
+        });
+        await tgApi("sendMessage", {
+          chat_id: chatId,
+          text: `🕒 Session: *${session}*\n\n*Step 3/5 — Choose Trade Outcome:*`,
+          parse_mode: "Markdown",
+          reply_markup: outcomeKeyboard(),
+        });
+        return NextResponse.json({ ok: true });
+      }
+
+      if (data.startsWith("OUT:")) {
+        const outcome = data.slice(4) as "WIN" | "LOSS" | "BE";
+        const nextDraft = { ...draft, outcome };
+        if (outcome === "BE") {
+          nextDraft.pnl = 0;
+          await supabase.from("telegram_sessions").upsert({
+            chat_id: chatId,
+            user_id: profile.id,
+            step: "ASK_REASON",
+            draft: nextDraft,
+            updated_at: new Date().toISOString(),
+          });
+          await tgApi("sendMessage", {
+            chat_id: chatId,
+            text: `➖ Outcome: *BREAK-EVEN ($0)*\n\n*Step 4/5 — Type Trade Reason / Setup:*\n_Example: Liquidity sweep + 1m BOS, moved SL to BE_`,
+            parse_mode: "Markdown",
+            reply_markup: skipCancelKeyboard("SKIP_REASON"),
+          });
+        } else {
+          const risk = Number(draft.risk_per_trade) || 100;
+          const rr = Number(draft.rr_ratio) || 2;
+          await supabase.from("telegram_sessions").upsert({
+            chat_id: chatId,
+            user_id: profile.id,
+            step: "ASK_PNL",
+            draft: nextDraft,
+            updated_at: new Date().toISOString(),
+          });
+          await tgApi("sendMessage", {
+            chat_id: chatId,
+            text: `${outcome === "WIN" ? "✅" : "❌"} Outcome: *${outcome}*\n\n*Step 3.5/5 — Tap a preset P/L or type exact $ amount:*\n_Example: ${outcome === "WIN" ? "250" : "-100"}_`,
+            parse_mode: "Markdown",
+            reply_markup: pnlKeyboard(outcome, risk, rr),
+          });
+        }
+        return NextResponse.json({ ok: true });
+      }
+
+      if (data.startsWith("PNL:")) {
+        const pnl = parseFloat(data.slice(4)) || 0;
+        await supabase.from("telegram_sessions").upsert({
+          chat_id: chatId,
+          user_id: profile.id,
+          step: "ASK_REASON",
+          draft: { ...draft, pnl },
+          updated_at: new Date().toISOString(),
+        });
+        await tgApi("sendMessage", {
+          chat_id: chatId,
+          text: `💰 Net P/L: *${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}*\n\n*Step 4/5 — Type Trade Reason / Setup:*\n_Example: London sweep into FVG entry_`,
+          parse_mode: "Markdown",
+          reply_markup: skipCancelKeyboard("SKIP_REASON"),
+        });
+        return NextResponse.json({ ok: true });
+      }
+
+      if (data === "SKIP_REASON") {
+        await supabase.from("telegram_sessions").upsert({
+          chat_id: chatId,
+          user_id: profile.id,
+          step: "ASK_PHOTO",
+          draft: { ...draft, reason: null },
+          updated_at: new Date().toISOString(),
+        });
+        await tgApi("sendMessage", {
+          chat_id: chatId,
+          text: `*Step 5/5 — Send Chart Screenshot Photo:*\nAttach an image from your gallery/camera, or tap *Skip* to finish.`,
+          parse_mode: "Markdown",
+          reply_markup: skipCancelKeyboard("SKIP_PHOTO"),
+        });
+        return NextResponse.json({ ok: true });
+      }
+
+      if (data === "SKIP_PHOTO") {
+        await saveTradeToDb(supabase, chatId, profile.id, { ...draft, photo_url: null });
+        return NextResponse.json({ ok: true });
+      }
+
+      return NextResponse.json({ ok: true });
+    }
+
+    // 2. Handle Text & Photo Messages
+    const msg = body.message || body.edited_message;
     if (!msg || !msg.chat?.id) {
       return NextResponse.json({ ok: true });
     }
 
     const chatId = String(msg.chat.id);
     const text: string = (msg.text || msg.caption || "").trim();
-    const supabase = getAdminClient();
 
-    if (text.startsWith("/start") || text.startsWith("/chatid")) {
-      await sendTelegramMessage(
-        chatId,
-        `Your Telegram Chat ID is: ${chatId}\n\nPaste this ID into Settings in TradePulse Command to link your account.\n\nSend a trade anytime:\nXAUUSD WIN 250 | London sweep & BOS\nEURUSD LOSS -100 | Entered early\nBTCUSD BE 0 | Moved SL to BE\n(Attach a chart photo with caption to save it too!)`
-      );
+    if (text.startsWith("/start") || text.startsWith("/menu")) {
+      await tgApi("sendMessage", {
+        chat_id: chatId,
+        text: `👋 *Welcome to TradePulse Command Bot!*\n\n🆔 Your Chat ID: \`${chatId}\`\n_(Link this in Web App → Settings if not linked yet)_\n\nTap *➕ Log New Trade* below to enter a trade step-by-step with buttons:`,
+        parse_mode: "Markdown",
+        reply_markup: mainMenuKeyboard(),
+      });
       return NextResponse.json({ ok: true });
     }
 
-    const { data: profile, error: profileErr } = await supabase
+    const { data: profile } = await supabase
       .from("profiles")
-      .select("id, display_name")
+      .select("id")
       .eq("telegram_chat_id", chatId)
       .single();
 
-    if (profileErr || !profile) {
-      await sendTelegramMessage(
-        chatId,
-        `Telegram chat ${chatId} is not linked to any TradePulse account yet. Add Chat ID "${chatId}" in Terminal Settings.`
-      );
+    if (!profile) {
+      await tgApi("sendMessage", {
+        chat_id: chatId,
+        text: `⚠️ Your Telegram Chat ID (\`${chatId}\`) is not linked yet.\n\nPaste \`${chatId}\` into *Settings* in TradePulse Command, then tap below:`,
+        parse_mode: "Markdown",
+        reply_markup: mainMenuKeyboard(),
+      });
       return NextResponse.json({ ok: true });
     }
 
-    const { data: roadmaps } = await supabase
-      .from("roadmaps")
+    if (text.startsWith("/trade")) {
+      await startWizard(supabase, chatId, profile.id);
+      return NextResponse.json({ ok: true });
+    }
+
+    const { data: sess } = await supabase
+      .from("telegram_sessions")
       .select("*")
-      .eq("user_id", profile.id)
-      .eq("status", "active")
-      .order("created_at", { ascending: false })
-      .limit(1);
-
-    const activeRoadmap = roadmaps?.[0];
-    if (!activeRoadmap) {
-      await sendTelegramMessage(
-        chatId,
-        "No active roadmap found in your account. Create an active roadmap first."
-      );
-      return NextResponse.json({ ok: true });
-    }
-
-    const parsed = parseTradeCommand(text || "XAUUSD BE 0 | Photo trade");
-    if (!parsed) {
-      await sendTelegramMessage(
-        chatId,
-        "Format: SYMBOL WIN/LOSS/BE [PNL] | reason\nExample: XAUUSD WIN 250 | Clean 15m breakout"
-      );
-      return NextResponse.json({ ok: true });
-    }
-
-    let photoUrl: string | null = null;
-    const botToken = process.env.TELEGRAM_BOT_TOKEN;
-    if (Array.isArray(msg.photo) && msg.photo.length > 0 && botToken) {
-      const largestPhoto = msg.photo[msg.photo.length - 1];
-      const fileRes = await fetch(
-        `https://api.telegram.org/bot${botToken}/getFile?file_id=${largestPhoto.file_id}`
-      );
-      const fileJson = await fileRes.json();
-      const filePath = fileJson?.result?.file_path;
-      if (filePath) {
-        const imgRes = await fetch(
-          `https://api.telegram.org/file/bot${botToken}/${filePath}`
-        );
-        const arrayBuf = await imgRes.arrayBuffer();
-        const ext = filePath.split(".").pop() || "jpg";
-        const storagePath = `${profile.id}/${Date.now()}-${largestPhoto.file_unique_id}.${ext}`;
-        const { error: uploadErr } = await supabase.storage
-          .from("trade-photos")
-          .upload(storagePath, new Uint8Array(arrayBuf), {
-            contentType: `image/${ext === "jpg" ? "jpeg" : ext}`,
-            upsert: false,
-          });
-        if (!uploadErr) {
-          const { data: pub } = supabase.storage
-            .from("trade-photos")
-            .getPublicUrl(storagePath);
-          photoUrl = pub.publicUrl;
-        }
-      }
-    }
-
-    const today = new Date().toISOString().split("T")[0];
-    let { data: dayRecord } = await supabase
-      .from("daily_records")
-      .select("id, entry_mode")
-      .eq("roadmap_id", activeRoadmap.id)
-      .eq("trade_date", today)
+      .eq("chat_id", chatId)
       .single();
 
-    if (!dayRecord) {
-      const { data: createdDay, error: dayErr } = await supabase
-        .from("daily_records")
-        .insert({
-          user_id: profile.id,
-          roadmap_id: activeRoadmap.id,
-          trade_date: today,
-          entry_mode: "detailed",
-          session: "New York",
-          total_trades: 0,
-          wins: 0,
-          losses: 0,
-          break_evens: 0,
-          gross_profit: 0,
-          gross_loss: 0,
-        })
-        .select("id, entry_mode")
-        .single();
+    const step = sess?.step || "IDLE";
+    const draft = (sess?.draft as Record<string, any>) || {};
 
-      if (dayErr || !createdDay) {
-        await sendTelegramMessage(chatId, `Failed to prepare trading day: ${dayErr?.message || "Unknown error"}`);
+    if (step === "ASK_SYMBOL" && text) {
+      const symbol = text.toUpperCase().replace(/[^A-Z0-9._-]/g, "");
+      await supabase.from("telegram_sessions").upsert({
+        chat_id: chatId,
+        user_id: profile.id,
+        step: "ASK_SESSION",
+        draft: { ...draft, symbol },
+        updated_at: new Date().toISOString(),
+      });
+      await tgApi("sendMessage", {
+        chat_id: chatId,
+        text: `📌 Symbol: *${symbol}*\n\n*Step 2/5 — Choose Trading Session:*`,
+        parse_mode: "Markdown",
+        reply_markup: sessionKeyboard(),
+      });
+      return NextResponse.json({ ok: true });
+    }
+
+    if (step === "ASK_PNL" && text) {
+      const num = parseFloat(text.replace(/[^0-9.-]/g, ""));
+      if (Number.isNaN(num) || num === 0) {
+        await tgApi("sendMessage", {
+          chat_id: chatId,
+          text: `⚠️ Please enter a valid dollar amount (e.g. \`250\` or \`-100\`), or tap a preset button above.`,
+          parse_mode: "Markdown",
+        });
         return NextResponse.json({ ok: true });
       }
-      dayRecord = createdDay;
-    }
+      const outcome: "WIN" | "LOSS" = draft.outcome === "LOSS" ? "LOSS" : "WIN";
+      const pnl = outcome === "WIN" ? Math.abs(num) : -Math.abs(num);
 
-    if (dayRecord.entry_mode === "summary") {
-      await sendTelegramMessage(
-        chatId,
-        "Today's record is set to Quick Summary mode. Switch it to Detailed mode in the web app to log individual trades."
-      );
+      await supabase.from("telegram_sessions").upsert({
+        chat_id: chatId,
+        user_id: profile.id,
+        step: "ASK_REASON",
+        draft: { ...draft, pnl },
+        updated_at: new Date().toISOString(),
+      });
+      await tgApi("sendMessage", {
+        chat_id: chatId,
+        text: `💰 Net P/L: *${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}*\n\n*Step 4/5 — Type Trade Reason / Setup:*\n_Example: 15m order block + confirmation_`,
+        parse_mode: "Markdown",
+        reply_markup: skipCancelKeyboard("SKIP_REASON"),
+      });
       return NextResponse.json({ ok: true });
     }
 
-    const riskAmt = Number(activeRoadmap.risk_per_trade) || Math.abs(parsed.pnl) || 100;
-    const rrVal =
-      parsed.outcome === "WIN" && riskAmt > 0
-        ? Number((parsed.pnl / riskAmt).toFixed(2))
-        : parsed.outcome === "LOSS"
-        ? -1
-        : 0;
+    if (step === "ASK_REASON" && text) {
+      await supabase.from("telegram_sessions").upsert({
+        chat_id: chatId,
+        user_id: profile.id,
+        step: "ASK_PHOTO",
+        draft: { ...draft, reason: text },
+        updated_at: new Date().toISOString(),
+      });
+      await tgApi("sendMessage", {
+        chat_id: chatId,
+        text: `📝 Reason saved!\n\n*Step 5/5 — Send Chart Screenshot Photo:*\nUpload an image now, or tap *Skip* to finish.`,
+        parse_mode: "Markdown",
+        reply_markup: skipCancelKeyboard("SKIP_PHOTO"),
+      });
+      return NextResponse.json({ ok: true });
+    }
 
-    const { error: tradeErr } = await supabase.from("trades").insert({
-      user_id: profile.id,
-      roadmap_id: activeRoadmap.id,
-      daily_record_id: dayRecord.id,
-      symbol: parsed.symbol,
-      session: "New York",
-      outcome: parsed.outcome,
-      risk_amount: riskAmt,
-      rr_achieved: rrVal,
-      pnl: parsed.pnl,
-      notes: parsed.reason,
-      photo_url: photoUrl,
+    if (step === "ASK_PHOTO") {
+      if (Array.isArray(msg.photo) && msg.photo.length > 0) {
+        const botToken = process.env.TELEGRAM_BOT_TOKEN;
+        let photoUrl: string | null = null;
+        if (botToken) {
+          const largest = msg.photo[msg.photo.length - 1];
+          const fileRes = await fetch(
+            `https://api.telegram.org/bot${botToken}/getFile?file_id=${largest.file_id}`
+          );
+          const fileJson = await fileRes.json();
+          const filePath = fileJson?.result?.file_path;
+          if (filePath) {
+            const imgRes = await fetch(
+              `https://api.telegram.org/file/bot${botToken}/${filePath}`
+            );
+            const buf = await imgRes.arrayBuffer();
+            const ext = filePath.split(".").pop() || "jpg";
+            const storagePath = `${profile.id}/${Date.now()}-${largest.file_unique_id}.${ext}`;
+            const { error: upErr } = await supabase.storage
+              .from("trade-photos")
+              .upload(storagePath, new Uint8Array(buf), {
+                contentType: `image/${ext === "jpg" ? "jpeg" : ext}`,
+              });
+            if (!upErr) {
+              const { data: pub } = supabase.storage
+                .from("trade-photos")
+                .getPublicUrl(storagePath);
+              photoUrl = pub.publicUrl;
+            }
+          }
+        }
+        await saveTradeToDb(supabase, chatId, profile.id, { ...draft, photo_url: photoUrl });
+        return NextResponse.json({ ok: true });
+      } else {
+        await tgApi("sendMessage", {
+          chat_id: chatId,
+          text: "📸 Please send a *Photo* image, or tap *⏭ Skip* below:",
+          parse_mode: "Markdown",
+          reply_markup: skipCancelKeyboard("SKIP_PHOTO"),
+        });
+        return NextResponse.json({ ok: true });
+      }
+    }
+
+    // Default fallback when IDLE
+    await tgApi("sendMessage", {
+      chat_id: chatId,
+      text: "Tap *➕ Log New Trade* below to record a trade step-by-step:",
+      parse_mode: "Markdown",
+      reply_markup: mainMenuKeyboard(),
     });
-
-    if (tradeErr) {
-      await sendTelegramMessage(chatId, `Trade save failed: ${tradeErr.message}`);
-      return NextResponse.json({ ok: true });
-    }
-
-    await sendTelegramMessage(
-      chatId,
-      `Logged ${parsed.symbol} ${parsed.outcome} (${parsed.pnl >= 0 ? "+" : ""}${parsed.pnl.toFixed(2)}) on "${activeRoadmap.name}"${parsed.reason ? `\nReason: ${parsed.reason}` : ""}${photoUrl ? "\nPhoto saved to Supabase Storage" : ""}`
-    );
-
     return NextResponse.json({ ok: true });
   } catch (err: any) {
-    console.error("Telegram webhook error:", err);
+    console.error("Telegram wizard error:", err);
     return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
   }
 }
