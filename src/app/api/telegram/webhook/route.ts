@@ -513,7 +513,7 @@ export async function POST(req: NextRequest) {
 
       if (data.startsWith("OUT:")) {
         const outcome = data.slice(4) as "WIN" | "LOSS" | "BE";
-        const nextDraft = { ...draft, outcome };
+        const nextDraft: Record<string, any> = { ...draft, outcome };
         if (outcome === "BE") {
           nextDraft.pnl = 0;
           await supabase.from("telegram_sessions").upsert({
