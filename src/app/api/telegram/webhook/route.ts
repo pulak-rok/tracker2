@@ -96,24 +96,23 @@ function outcomeKeyboard() {
   };
 }
 
-function pnlKeyboard(outcome: "WIN" | "LOSS" | "BE", risk: number, rr: number) {
-  const defaultWin = Number((risk * rr).toFixed(2));
-  const halfWin = Number(((risk * rr) / 2).toFixed(2));
-  const tripleWin = Number((risk * 3).toFixed(2));
-  const defaultLoss = Number(risk.toFixed(2));
-  const halfLoss = Number((risk / 2).toFixed(2));
-
+function rrKeyboard(outcome: "WIN" | "LOSS" | "BE", risk: number, defaultRr: number) {
   if (outcome === "WIN") {
     return {
       inline_keyboard: [
         [
-          { text: `+$${halfWin} (0.5x)`, callback_data: `PNL:${halfWin}` },
-          { text: `+$${defaultWin} (1:${rr}R)`, callback_data: `PNL:${defaultWin}` },
+          { text: `1:1 (+$${(risk * 1).toFixed(0)})`, callback_data: "RR:1" },
+          { text: `1:2 (+$${(risk * 2).toFixed(0)})`, callback_data: "RR:2" },
+          { text: `1:3 (+$${(risk * 3).toFixed(0)})`, callback_data: "RR:3" },
         ],
         [
-          { text: `+$${risk} (1R)`, callback_data: `PNL:${risk}` },
-          { text: `+$${tripleWin} (3R)`, callback_data: `PNL:${tripleWin}` },
+          { text: `1:4 (+$${(risk * 4).toFixed(0)})`, callback_data: "RR:4" },
+          { text: `1:5 (+$${(risk * 5).toFixed(0)})`, callback_data: "RR:5" },
+          { text: `1:6 (+$${(risk * 6).toFixed(0)})`, callback_data: "RR:6" },
         ],
+        ...(defaultRr && ![1, 2, 3, 4, 5, 6].includes(defaultRr)
+          ? [[{ text: `1:${defaultRr} Roadmap Default (+$${(risk * defaultRr).toFixed(2)})`, callback_data: `RR:${defaultRr}` }]]
+          : []),
         [{ text: "❌ Cancel", callback_data: "CANCEL" }],
       ],
     };
@@ -121,8 +120,8 @@ function pnlKeyboard(outcome: "WIN" | "LOSS" | "BE", risk: number, rr: number) {
   return {
     inline_keyboard: [
       [
-        { text: `-$${halfLoss} (-0.5R)`, callback_data: `PNL:-${halfLoss}` },
-        { text: `-$${defaultLoss} (-1R)`, callback_data: `PNL:-${defaultLoss}` },
+        { text: `-1R (-$${risk.toFixed(2)})`, callback_data: "RR:-1" },
+        { text: `-0.5R (-$${(risk * 0.5).toFixed(2)})`, callback_data: "RR:-0.5" },
       ],
       [{ text: "❌ Cancel", callback_data: "CANCEL" }],
     ],
@@ -132,16 +131,10 @@ function pnlKeyboard(outcome: "WIN" | "LOSS" | "BE", risk: number, rr: number) {
 function reasonKeyboard() {
   return {
     inline_keyboard: [
+      [{ text: "1h orderblock to m5 orderblock", callback_data: "RSN:1h orderblock to m5 orderblock" }],
+      [{ text: "4h orderblock to m15 orderblock", callback_data: "RSN:4h orderblock to m15 orderblock" }],
       [
-        { text: "📌 Liquidity Sweep + BOS", callback_data: "RSN:Liquidity Sweep + BOS" },
-        { text: "📌 FVG / Order Block", callback_data: "RSN:FVG / Order Block" },
-      ],
-      [
-        { text: "📌 Trend Continuation", callback_data: "RSN:Trend Continuation" },
-        { text: "📌 Breakout + Retest", callback_data: "RSN:Breakout + Retest" },
-      ],
-      [
-        { text: "⏭ Skip Reason", callback_data: "SKIP_REASON" },
+        { text: "⏭ Skip", callback_data: "SKIP_REASON" },
         { text: "❌ Cancel", callback_data: "CANCEL" },
       ],
     ],
@@ -155,6 +148,23 @@ function photoKeyboard() {
       [{ text: "❌ Cancel", callback_data: "CANCEL" }],
     ],
   };
+}
+
+function parseRrInput(raw: string, outcome: "WIN" | "LOSS"): number | null {
+  const cleaned = raw.trim().toLowerCase().replace(/r$/i, "");
+  if (cleaned.includes(":")) {
+    const parts = cleaned.split(":");
+    const left = parseFloat(parts[0]);
+    const right = parseFloat(parts[1]);
+    if (!Number.isNaN(left) && left > 0 && !Number.isNaN(right) && right > 0) {
+      const ratio = Number((right / left).toFixed(2));
+      return outcome === "WIN" ? ratio : -ratio;
+    }
+    return null;
+  }
+  const num = parseFloat(cleaned.replace(/[^0-9.-]/g, ""));
+  if (Number.isNaN(num) || num === 0) return null;
+  return outcome === "WIN" ? Math.abs(num) : -Math.abs(num);
 }
 
 async function saveTradeToDb(
@@ -226,18 +236,24 @@ async function saveTradeToDb(
   }
 
   const outcome: "WIN" | "LOSS" | "BE" = draft.outcome || "WIN";
-  let pnl = Number(draft.pnl) || 0;
-  if (outcome === "WIN" && pnl <= 0) pnl = Math.abs(pnl) || Number(roadmap.risk_per_trade) || 100;
-  if (outcome === "LOSS" && pnl >= 0) pnl = -(Math.abs(pnl) || Number(roadmap.risk_per_trade) || 100);
-  if (outcome === "BE") pnl = 0;
+  const riskAmt = Number(roadmap.risk_per_trade) || 100;
+  let rrVal = Number(draft.rr_achieved);
 
-  const riskAmt = Number(roadmap.risk_per_trade) || Math.abs(pnl) || 100;
-  const rrVal =
-    outcome === "WIN" && riskAmt > 0
-      ? Number((pnl / riskAmt).toFixed(2))
-      : outcome === "LOSS"
-      ? -1
-      : 0;
+  if (outcome === "BE") {
+    rrVal = 0;
+  } else if (outcome === "WIN") {
+    rrVal = rrVal > 0 ? rrVal : Number(roadmap.rr_ratio) || 2;
+  } else {
+    rrVal = rrVal < 0 ? rrVal : -1;
+  }
+
+  const pnl = outcome === "BE" ? 0 : Number((riskAmt * rrVal).toFixed(2));
+  const rrLabel =
+    outcome === "BE"
+      ? "0R (BE)"
+      : outcome === "WIN"
+      ? `1:${rrVal} (+${rrVal}R)`
+      : `${rrVal}R`;
 
   const { error: tradeErr } = await supabase.from("trades").insert({
     user_id: userId,
@@ -275,7 +291,8 @@ async function saveTradeToDb(
     `• *Roadmap:* ${roadmap.name}`,
     `• *Pair:* ${(draft.symbol || "XAUUSD").toUpperCase()}`,
     `• *Session:* ${draft.session || "New York"}`,
-    `• *Outcome:* ${outcome} (${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)})`,
+    `• *Outcome:* ${outcome}`,
+    `• *R:R:* ${rrLabel} (${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)})`,
     `• *Reason:* ${draft.reason || "—"}`,
     `• *Chart Photo:* ${draft.photo_url ? "Attached ✅" : "None"}`,
   ].join("\n");
@@ -453,7 +470,7 @@ export async function POST(req: NextRequest) {
           .single();
 
         if (!rm) return NextResponse.json({ ok: true });
-        const nextDraft = {
+        const nextDraft: Record<string, any> = {
           ...draft,
           roadmap_id: rm.id,
           risk_per_trade: Number(rm.risk_per_trade),
@@ -515,6 +532,7 @@ export async function POST(req: NextRequest) {
         const outcome = data.slice(4) as "WIN" | "LOSS" | "BE";
         const nextDraft: Record<string, any> = { ...draft, outcome };
         if (outcome === "BE") {
+          nextDraft.rr_achieved = 0;
           nextDraft.pnl = 0;
           await supabase.from("telegram_sessions").upsert({
             chat_id: chatId,
@@ -525,7 +543,7 @@ export async function POST(req: NextRequest) {
           });
           await tgApi("sendMessage", {
             chat_id: chatId,
-            text: `➖ Outcome: *BREAK-EVEN ($0)*\n\n*Step 4/5 — Tap a Reason below or type your own:*\n_Example: Moved SL to BE after 1:1R_`,
+            text: `➖ Outcome: *BREAK-EVEN (0R)*\n\n*Step 4/5 — Select Reason:*`,
             parse_mode: "Markdown",
             reply_markup: reasonKeyboard(),
           });
@@ -535,32 +553,35 @@ export async function POST(req: NextRequest) {
           await supabase.from("telegram_sessions").upsert({
             chat_id: chatId,
             user_id: profile.id,
-            step: "ASK_PNL",
+            step: "ASK_RR",
             draft: nextDraft,
             updated_at: new Date().toISOString(),
           });
           await tgApi("sendMessage", {
             chat_id: chatId,
-            text: `${outcome === "WIN" ? "✅" : "❌"} Outcome: *${outcome}*\n\n*Step 3.5/5 — Tap a preset P/L or type exact $ amount:*\n_Example: ${outcome === "WIN" ? "250" : "-100"}_`,
+            text: `${outcome === "WIN" ? "✅" : "❌"} Outcome: *${outcome}*\n\n*Step 3.5/5 — Select or type Risk:Reward (R:R):*\n_Example: ${outcome === "WIN" ? "1:4 or 4" : "-1 or -0.5"}_`,
             parse_mode: "Markdown",
-            reply_markup: pnlKeyboard(outcome, risk, rr),
+            reply_markup: rrKeyboard(outcome, risk, rr),
           });
         }
         return NextResponse.json({ ok: true });
       }
 
-      if (data.startsWith("PNL:")) {
-        const pnl = parseFloat(data.slice(4)) || 0;
+      if (data.startsWith("RR:")) {
+        const rrVal = parseFloat(data.slice(3)) || 0;
+        const risk = Number(draft.risk_per_trade) || 100;
+        const pnl = Number((risk * rrVal).toFixed(2));
         await supabase.from("telegram_sessions").upsert({
           chat_id: chatId,
           user_id: profile.id,
           step: "ASK_REASON",
-          draft: { ...draft, pnl },
+          draft: { ...draft, rr_achieved: rrVal, pnl },
           updated_at: new Date().toISOString(),
         });
+        const rrText = rrVal > 0 ? `1:${rrVal} (+${rrVal}R)` : `${rrVal}R`;
         await tgApi("sendMessage", {
           chat_id: chatId,
-          text: `💰 Net P/L: *${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}*\n\n*Step 4/5 — Tap a Reason below or type your own:*\n_Example: London sweep into 15m FVG_`,
+          text: `📐 R:R: *${rrText}* (${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)})\n\n*Step 4/5 — Select Reason:*`,
           parse_mode: "Markdown",
           reply_markup: reasonKeyboard(),
         });
@@ -635,7 +656,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // Clicking Telegram's Start button (/start) immediately opens the inline-button trade wizard!
     if (text.startsWith("/start")) {
       await startWizard(supabase, chatId, profile.id);
       return NextResponse.json({ ok: true });
@@ -668,29 +688,31 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    if (step === "ASK_PNL" && text) {
-      const num = parseFloat(text.replace(/[^0-9.-]/g, ""));
-      if (Number.isNaN(num) || num === 0) {
+    if (step === "ASK_RR" && text) {
+      const outcome: "WIN" | "LOSS" = draft.outcome === "LOSS" ? "LOSS" : "WIN";
+      const rrVal = parseRrInput(text, outcome);
+      if (rrVal === null) {
         await tgApi("sendMessage", {
           chat_id: chatId,
-          text: `⚠️ Tap a preset button above or enter a valid dollar amount (e.g. \`250\` or \`-100\`).`,
+          text: `⚠️ Tap an R:R button above or type a valid R:R (e.g. \`1:4\` or \`4\`).`,
           parse_mode: "Markdown",
         });
         return NextResponse.json({ ok: true });
       }
-      const outcome: "WIN" | "LOSS" = draft.outcome === "LOSS" ? "LOSS" : "WIN";
-      const pnl = outcome === "WIN" ? Math.abs(num) : -Math.abs(num);
+      const risk = Number(draft.risk_per_trade) || 100;
+      const pnl = Number((risk * rrVal).toFixed(2));
+      const rrText = rrVal > 0 ? `1:${rrVal} (+${rrVal}R)` : `${rrVal}R`;
 
       await supabase.from("telegram_sessions").upsert({
         chat_id: chatId,
         user_id: profile.id,
         step: "ASK_REASON",
-        draft: { ...draft, pnl },
+        draft: { ...draft, rr_achieved: rrVal, pnl },
         updated_at: new Date().toISOString(),
       });
       await tgApi("sendMessage", {
         chat_id: chatId,
-        text: `💰 Net P/L: *${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}*\n\n*Step 4/5 — Tap a Reason below or type your own:*\n_Example: 15m order block + confirmation_`,
+        text: `📐 R:R: *${rrText}* (${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)})\n\n*Step 4/5 — Select Reason:*`,
         parse_mode: "Markdown",
         reply_markup: reasonKeyboard(),
       });
@@ -758,7 +780,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Any other message when IDLE: show inline buttons right away
     await tgApi("sendMessage", {
       chat_id: chatId,
       text: "Tap *Start Trade Entry* below to begin with inline buttons:",
