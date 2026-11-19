@@ -7,6 +7,7 @@ export interface Profile {
   id: string;
   display_name: string | null;
   currency: string;
+  telegram_chat_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -25,6 +26,7 @@ export interface Roadmap {
   max_drawdown: number | null;
   daily_trade_limit: number | null;
   notes: string | null;
+  photo_url?: string | null;
   status: RoadmapStatus;
   created_at: string;
   updated_at: string;
@@ -45,6 +47,7 @@ export interface DailyRecord {
   gross_loss: number;
   net_pl: number;
   notes: string | null;
+  photo_url?: string | null;
   created_at: string;
   updated_at: string;
   trades?: Trade[];
@@ -63,6 +66,7 @@ export interface Trade {
   rr_achieved: number | null;
   pnl: number;
   notes: string | null;
+  photo_url?: string | null;
   created_at: string;
   updated_at: string;
   roadmaps?: { name: string };

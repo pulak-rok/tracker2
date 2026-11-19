@@ -7,6 +7,7 @@ import { Loader2, Check } from "lucide-react";
 export default function SettingsPage() {
   const [displayName, setDisplayName] = useState("");
   const [currency, setCurrency] = useState("USD");
+  const [telegramChatId, setTelegramChatId] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -24,6 +25,7 @@ export default function SettingsPage() {
       if (data) {
         setDisplayName(data.display_name || "");
         setCurrency(data.currency || "USD");
+        setTelegramChatId(data.telegram_chat_id || "");
       }
     }
     setLoading(false);
@@ -41,7 +43,11 @@ export default function SettingsPage() {
     if (user) {
       await supabase
         .from("profiles")
-        .update({ display_name: displayName, currency })
+        .update({
+          display_name: displayName,
+          currency,
+          telegram_chat_id: telegramChatId.trim() || null,
+        })
         .eq("id", user.id);
       setSaved(true);
     }
@@ -60,7 +66,7 @@ export default function SettingsPage() {
     <div className="max-w-xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-white tracking-tight">Terminal Settings</h1>
-        <p className="text-xs text-gray-400 mt-1">Manage your trader profile and display preferences.</p>
+        <p className="text-xs text-gray-400 mt-1">Manage your trader profile, currency, and Telegram bot link.</p>
       </div>
 
       <form onSubmit={handleSave} className="bg-terminal-surface border border-terminal-border rounded-xl p-6 space-y-4 text-xs">
@@ -84,6 +90,16 @@ export default function SettingsPage() {
             <option value="EUR">EUR (€)</option>
             <option value="GBP">GBP (£)</option>
           </select>
+        </div>
+        <div>
+          <label className="block text-gray-400 mb-1">Telegram Chat ID</label>
+          <input
+            type="text"
+            value={telegramChatId}
+            onChange={(e) => setTelegramChatId(e.target.value)}
+            placeholder="Send /start to your bot to get your Chat ID"
+            className="w-full bg-terminal-elevated border border-terminal-border rounded-lg p-2.5 text-white font-mono"
+          />
         </div>
 
         <button
