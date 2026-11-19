@@ -25,7 +25,7 @@ async function tgApi(method: string, payload: Record<string, any>) {
 function mainMenuKeyboard() {
   return {
     inline_keyboard: [
-      [{ text: "➕ Log New Trade", callback_data: "START_TRADE" }],
+      [{ text: "➕ Start Trade Entry", callback_data: "START_TRADE" }],
       [
         { text: "📊 Today Summary", callback_data: "TODAY_STATS" },
         { text: "🆔 My Chat ID", callback_data: "SHOW_CHAT_ID" },
@@ -57,6 +57,10 @@ function symbolKeyboard() {
         { text: "NAS100", callback_data: "SYM:NAS100" },
         { text: "US30", callback_data: "SYM:US30" },
         { text: "BTCUSD", callback_data: "SYM:BTCUSD" },
+      ],
+      [
+        { text: "USDJPY", callback_data: "SYM:USDJPY" },
+        { text: "GBPJPY", callback_data: "SYM:GBPJPY" },
       ],
       [{ text: "❌ Cancel", callback_data: "CANCEL" }],
     ],
@@ -94,14 +98,21 @@ function outcomeKeyboard() {
 
 function pnlKeyboard(outcome: "WIN" | "LOSS" | "BE", risk: number, rr: number) {
   const defaultWin = Number((risk * rr).toFixed(2));
+  const halfWin = Number(((risk * rr) / 2).toFixed(2));
+  const tripleWin = Number((risk * 3).toFixed(2));
   const defaultLoss = Number(risk.toFixed(2));
+  const halfLoss = Number((risk / 2).toFixed(2));
+
   if (outcome === "WIN") {
     return {
       inline_keyboard: [
         [
+          { text: `+$${halfWin} (0.5x)`, callback_data: `PNL:${halfWin}` },
           { text: `+$${defaultWin} (1:${rr}R)`, callback_data: `PNL:${defaultWin}` },
+        ],
+        [
           { text: `+$${risk} (1R)`, callback_data: `PNL:${risk}` },
-          { text: `+$${risk * 3} (3R)`, callback_data: `PNL:${risk * 3}` },
+          { text: `+$${tripleWin} (3R)`, callback_data: `PNL:${tripleWin}` },
         ],
         [{ text: "❌ Cancel", callback_data: "CANCEL" }],
       ],
@@ -110,18 +121,37 @@ function pnlKeyboard(outcome: "WIN" | "LOSS" | "BE", risk: number, rr: number) {
   return {
     inline_keyboard: [
       [
+        { text: `-$${halfLoss} (-0.5R)`, callback_data: `PNL:-${halfLoss}` },
         { text: `-$${defaultLoss} (-1R)`, callback_data: `PNL:-${defaultLoss}` },
-        { text: `-$${(defaultLoss / 2).toFixed(2)} (-0.5R)`, callback_data: `PNL:-${(defaultLoss / 2).toFixed(2)}` },
       ],
       [{ text: "❌ Cancel", callback_data: "CANCEL" }],
     ],
   };
 }
 
-function skipCancelKeyboard(skipCode: string) {
+function reasonKeyboard() {
   return {
     inline_keyboard: [
-      [{ text: "⏭ Skip", callback_data: skipCode }],
+      [
+        { text: "📌 Liquidity Sweep + BOS", callback_data: "RSN:Liquidity Sweep + BOS" },
+        { text: "📌 FVG / Order Block", callback_data: "RSN:FVG / Order Block" },
+      ],
+      [
+        { text: "📌 Trend Continuation", callback_data: "RSN:Trend Continuation" },
+        { text: "📌 Breakout + Retest", callback_data: "RSN:Breakout + Retest" },
+      ],
+      [
+        { text: "⏭ Skip Reason", callback_data: "SKIP_REASON" },
+        { text: "❌ Cancel", callback_data: "CANCEL" },
+      ],
+    ],
+  };
+}
+
+function photoKeyboard() {
+  return {
+    inline_keyboard: [
+      [{ text: "⏭ Skip Photo & Save Trade", callback_data: "SKIP_PHOTO" }],
       [{ text: "❌ Cancel", callback_data: "CANCEL" }],
     ],
   };
@@ -294,7 +324,7 @@ async function startWizard(
     });
     await tgApi("sendMessage", {
       chat_id: chatId,
-      text: `🎯 Roadmap: *${rm.name}*\n\n*Step 1/5 — Select or type Pair / Symbol:*\n_Example: XAUUSD, EURUSD, NAS100_`,
+      text: `🎯 Roadmap: *${rm.name}*\n\n*Step 1/5 — Tap a Pair below (or type any pair):*\n_Examples: XAUUSD, EURUSD, NAS100_`,
       parse_mode: "Markdown",
       reply_markup: symbolKeyboard(),
     });
@@ -311,7 +341,7 @@ async function startWizard(
 
   await tgApi("sendMessage", {
     chat_id: chatId,
-    text: "🎯 *Choose a Roadmap for this trade:*",
+    text: "🎯 *Choose a Roadmap:*",
     parse_mode: "Markdown",
     reply_markup: roadmapKeyboard(roadmaps),
   });
@@ -365,7 +395,7 @@ export async function POST(req: NextRequest) {
         });
         await tgApi("sendMessage", {
           chat_id: chatId,
-          text: "❌ Trade entry cancelled.",
+          text: "❌ Cancelled.",
           reply_markup: mainMenuKeyboard(),
         });
         return NextResponse.json({ ok: true });
@@ -438,7 +468,7 @@ export async function POST(req: NextRequest) {
         });
         await tgApi("sendMessage", {
           chat_id: chatId,
-          text: `🎯 Roadmap: *${rm.name}*\n\n*Step 1/5 — Tap or type Symbol:*\n_Example: XAUUSD, EURUSD, NAS100_`,
+          text: `🎯 Roadmap: *${rm.name}*\n\n*Step 1/5 — Tap a Pair below (or type any pair):*\n_Examples: XAUUSD, EURUSD, NAS100_`,
           parse_mode: "Markdown",
           reply_markup: symbolKeyboard(),
         });
@@ -456,7 +486,7 @@ export async function POST(req: NextRequest) {
         });
         await tgApi("sendMessage", {
           chat_id: chatId,
-          text: `📌 Symbol: *${symbol}*\n\n*Step 2/5 — Choose Trading Session:*`,
+          text: `📌 Pair: *${symbol}*\n\n*Step 2/5 — Tap Session:*`,
           parse_mode: "Markdown",
           reply_markup: sessionKeyboard(),
         });
@@ -474,7 +504,7 @@ export async function POST(req: NextRequest) {
         });
         await tgApi("sendMessage", {
           chat_id: chatId,
-          text: `🕒 Session: *${session}*\n\n*Step 3/5 — Choose Trade Outcome:*`,
+          text: `🕒 Session: *${session}*\n\n*Step 3/5 — Tap Outcome:*`,
           parse_mode: "Markdown",
           reply_markup: outcomeKeyboard(),
         });
@@ -495,9 +525,9 @@ export async function POST(req: NextRequest) {
           });
           await tgApi("sendMessage", {
             chat_id: chatId,
-            text: `➖ Outcome: *BREAK-EVEN ($0)*\n\n*Step 4/5 — Type Trade Reason / Setup:*\n_Example: Liquidity sweep + 1m BOS, moved SL to BE_`,
+            text: `➖ Outcome: *BREAK-EVEN ($0)*\n\n*Step 4/5 — Tap a Reason below or type your own:*\n_Example: Moved SL to BE after 1:1R_`,
             parse_mode: "Markdown",
-            reply_markup: skipCancelKeyboard("SKIP_REASON"),
+            reply_markup: reasonKeyboard(),
           });
         } else {
           const risk = Number(draft.risk_per_trade) || 100;
@@ -530,9 +560,27 @@ export async function POST(req: NextRequest) {
         });
         await tgApi("sendMessage", {
           chat_id: chatId,
-          text: `💰 Net P/L: *${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}*\n\n*Step 4/5 — Type Trade Reason / Setup:*\n_Example: London sweep into FVG entry_`,
+          text: `💰 Net P/L: *${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}*\n\n*Step 4/5 — Tap a Reason below or type your own:*\n_Example: London sweep into 15m FVG_`,
           parse_mode: "Markdown",
-          reply_markup: skipCancelKeyboard("SKIP_REASON"),
+          reply_markup: reasonKeyboard(),
+        });
+        return NextResponse.json({ ok: true });
+      }
+
+      if (data.startsWith("RSN:")) {
+        const reason = data.slice(4);
+        await supabase.from("telegram_sessions").upsert({
+          chat_id: chatId,
+          user_id: profile.id,
+          step: "ASK_PHOTO",
+          draft: { ...draft, reason },
+          updated_at: new Date().toISOString(),
+        });
+        await tgApi("sendMessage", {
+          chat_id: chatId,
+          text: `📝 Reason: *${reason}*\n\n*Step 5/5 — Send Chart Photo or tap Skip:*`,
+          parse_mode: "Markdown",
+          reply_markup: photoKeyboard(),
         });
         return NextResponse.json({ ok: true });
       }
@@ -547,9 +595,9 @@ export async function POST(req: NextRequest) {
         });
         await tgApi("sendMessage", {
           chat_id: chatId,
-          text: `*Step 5/5 — Send Chart Screenshot Photo:*\nAttach an image from your gallery/camera, or tap *Skip* to finish.`,
+          text: `*Step 5/5 — Send Chart Photo or tap Skip:*`,
           parse_mode: "Markdown",
-          reply_markup: skipCancelKeyboard("SKIP_PHOTO"),
+          reply_markup: photoKeyboard(),
         });
         return NextResponse.json({ ok: true });
       }
@@ -562,7 +610,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // 2. Handle Text & Photo Messages
+    // 2. Handle Start / Messages
     const msg = body.message || body.edited_message;
     if (!msg || !msg.chat?.id) {
       return NextResponse.json({ ok: true });
@@ -570,16 +618,6 @@ export async function POST(req: NextRequest) {
 
     const chatId = String(msg.chat.id);
     const text: string = (msg.text || msg.caption || "").trim();
-
-    if (text.startsWith("/start") || text.startsWith("/menu")) {
-      await tgApi("sendMessage", {
-        chat_id: chatId,
-        text: `👋 *Welcome to TradePulse Command Bot!*\n\n🆔 Your Chat ID: \`${chatId}\`\n_(Link this in Web App → Settings if not linked yet)_\n\nTap *➕ Log New Trade* below to enter a trade step-by-step with buttons:`,
-        parse_mode: "Markdown",
-        reply_markup: mainMenuKeyboard(),
-      });
-      return NextResponse.json({ ok: true });
-    }
 
     const { data: profile } = await supabase
       .from("profiles")
@@ -590,14 +628,15 @@ export async function POST(req: NextRequest) {
     if (!profile) {
       await tgApi("sendMessage", {
         chat_id: chatId,
-        text: `⚠️ Your Telegram Chat ID (\`${chatId}\`) is not linked yet.\n\nPaste \`${chatId}\` into *Settings* in TradePulse Command, then tap below:`,
+        text: `⚠️ Account not linked yet.\n\nCopy your Chat ID: \`${chatId}\`\nPaste it into *Settings* in TradePulse Command and save, then tap *Start Trade Entry* below:`,
         parse_mode: "Markdown",
         reply_markup: mainMenuKeyboard(),
       });
       return NextResponse.json({ ok: true });
     }
 
-    if (text.startsWith("/trade")) {
+    // Clicking Telegram's Start button (/start) immediately opens the inline-button trade wizard!
+    if (text.startsWith("/start")) {
       await startWizard(supabase, chatId, profile.id);
       return NextResponse.json({ ok: true });
     }
@@ -622,7 +661,7 @@ export async function POST(req: NextRequest) {
       });
       await tgApi("sendMessage", {
         chat_id: chatId,
-        text: `📌 Symbol: *${symbol}*\n\n*Step 2/5 — Choose Trading Session:*`,
+        text: `📌 Pair: *${symbol}*\n\n*Step 2/5 — Tap Session:*`,
         parse_mode: "Markdown",
         reply_markup: sessionKeyboard(),
       });
@@ -634,7 +673,7 @@ export async function POST(req: NextRequest) {
       if (Number.isNaN(num) || num === 0) {
         await tgApi("sendMessage", {
           chat_id: chatId,
-          text: `⚠️ Please enter a valid dollar amount (e.g. \`250\` or \`-100\`), or tap a preset button above.`,
+          text: `⚠️ Tap a preset button above or enter a valid dollar amount (e.g. \`250\` or \`-100\`).`,
           parse_mode: "Markdown",
         });
         return NextResponse.json({ ok: true });
@@ -651,9 +690,9 @@ export async function POST(req: NextRequest) {
       });
       await tgApi("sendMessage", {
         chat_id: chatId,
-        text: `💰 Net P/L: *${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}*\n\n*Step 4/5 — Type Trade Reason / Setup:*\n_Example: 15m order block + confirmation_`,
+        text: `💰 Net P/L: *${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}*\n\n*Step 4/5 — Tap a Reason below or type your own:*\n_Example: 15m order block + confirmation_`,
         parse_mode: "Markdown",
-        reply_markup: skipCancelKeyboard("SKIP_REASON"),
+        reply_markup: reasonKeyboard(),
       });
       return NextResponse.json({ ok: true });
     }
@@ -668,9 +707,9 @@ export async function POST(req: NextRequest) {
       });
       await tgApi("sendMessage", {
         chat_id: chatId,
-        text: `📝 Reason saved!\n\n*Step 5/5 — Send Chart Screenshot Photo:*\nUpload an image now, or tap *Skip* to finish.`,
+        text: `📝 Reason saved!\n\n*Step 5/5 — Send Chart Photo or tap Skip:*`,
         parse_mode: "Markdown",
-        reply_markup: skipCancelKeyboard("SKIP_PHOTO"),
+        reply_markup: photoKeyboard(),
       });
       return NextResponse.json({ ok: true });
     }
@@ -711,18 +750,18 @@ export async function POST(req: NextRequest) {
       } else {
         await tgApi("sendMessage", {
           chat_id: chatId,
-          text: "📸 Please send a *Photo* image, or tap *⏭ Skip* below:",
+          text: "📸 Send a chart photo or tap *Skip Photo & Save Trade* below:",
           parse_mode: "Markdown",
-          reply_markup: skipCancelKeyboard("SKIP_PHOTO"),
+          reply_markup: photoKeyboard(),
         });
         return NextResponse.json({ ok: true });
       }
     }
 
-    // Default fallback when IDLE
+    // Any other message when IDLE: show inline buttons right away
     await tgApi("sendMessage", {
       chat_id: chatId,
-      text: "Tap *➕ Log New Trade* below to record a trade step-by-step:",
+      text: "Tap *Start Trade Entry* below to begin with inline buttons:",
       parse_mode: "Markdown",
       reply_markup: mainMenuKeyboard(),
     });
